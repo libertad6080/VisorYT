@@ -1,2 +1,2 @@
 streamlit
-yt-dlp[default]
+yt-dlp[default] @ git+https://github.com/yt-dlp/yt-dlp@master
