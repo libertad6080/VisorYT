@@ -1,69 +1,57 @@
-import re
+import os
+import tempfile
+
 import streamlit as st
+import yt_dlp
 
-st.set_page_config(page_title="Mi lista de vídeos", page_icon="▶️", layout="wide")
+st.set_page_config(page_title="Reproductor de vídeo", page_icon="🎬")
+st.title("🎬 Reproductor de vídeo")
+st.caption("Pega una URL de YouTube y el vídeo se reproduce desde esta web, no desde YouTube.")
 
-PATRON = re.compile(r"(https?://)?(www\.|m\.)?(youtube\.com/(watch\?v=|shorts/|live/)|youtu\.be/)[\w\-]{11}")
+CACHE_DIR = os.path.join(tempfile.gettempdir(), "yt_cache")
+os.makedirs(CACHE_DIR, exist_ok=True)
 
-if "lista" not in st.session_state:
-    st.session_state.lista = []  # [{"titulo": ..., "url": ...}]
-
-
-def anadir(texto):
-    nuevos = 0
-    for linea in texto.splitlines():
-        url = linea.strip()
-        if not url:
-            continue
-        if not PATRON.search(url):
-            st.sidebar.warning(f"No parece un enlace de YouTube: {url[:40]}")
-            continue
-        if url.startswith("youtube.") or url.startswith("www.") or url.startswith("youtu.be"):
-            url = "https://" + url
-        if all(v["url"] != url for v in st.session_state.lista):
-            st.session_state.lista.append({"titulo": f"Vídeo {len(st.session_state.lista) + 1}", "url": url})
-            nuevos += 1
-    return nuevos
+MAX_DURACION = 15 * 60  # segundos; evita descargas enormes en el servidor
 
 
-st.title("▶️ Mi lista de vídeos")
+@st.cache_data(show_spinner=False, max_entries=5, ttl=3600)
+def descargar(url: str, altura: int):
+    opts = {
+        # Formato único (vídeo+audio) en mp4: no necesita ffmpeg
+        "format": f"best[height<={altura}][ext=mp4]/best[height<={altura}]",
+        "outtmpl": os.path.join(CACHE_DIR, "%(id)s_" + str(altura) + ".%(ext)s"),
+        "noplaylist": True,
+        "quiet": True,
+        "no_warnings": True,
+    }
+    # Si tienes cookies (ver notas), descomenta:
+    # opts["cookiefile"] = "cookies.txt"
 
-with st.sidebar:
-    st.header("Añadir vídeos")
-    texto = st.text_area("Pega uno o varios enlaces (uno por línea)", height=150)
-    if st.button("➕ Añadir a la lista", type="primary", use_container_width=True):
-        n = anadir(texto)
-        st.success(f"{n} vídeo(s) añadido(s)") if n else st.info("No se ha añadido nada nuevo")
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        info = ydl.extract_info(url, download=False)
+        if (info.get("duration") or 0) > MAX_DURACION:
+            raise ValueError(f"El vídeo supera el máximo de {MAX_DURACION // 60} minutos.")
+        info = ydl.extract_info(url, download=True)
+        ruta = ydl.prepare_filename(info)
 
-    if st.session_state.lista:
-        st.divider()
-        if st.button("🗑️ Vaciar lista", use_container_width=True):
-            st.session_state.lista = []
-            st.rerun()
+    with open(ruta, "rb") as f:
+        datos = f.read()
+    try:
+        os.remove(ruta)
+    except OSError:
+        pass
+    return info.get("title", "Vídeo"), datos
 
-lista = st.session_state.lista
-if not lista:
-    st.info("Pega un enlace de YouTube en la barra lateral para empezar.")
-else:
-    col_video, col_lista = st.columns([3, 1])
-    with col_lista:
-        st.subheader("Lista")
-        idx = st.radio(
-            "Elige un vídeo",
-            range(len(lista)),
-            format_func=lambda i: lista[i]["titulo"],
-            label_visibility="collapsed",
-        )
-        nuevo_titulo = st.text_input("Renombrar", value=lista[idx]["titulo"], key=f"t_{idx}")
-        if nuevo_titulo != lista[idx]["titulo"]:
-            lista[idx]["titulo"] = nuevo_titulo
-            st.rerun()
-        if st.button("❌ Quitar este vídeo", use_container_width=True):
-            lista.pop(idx)
-            st.rerun()
-    with col_video:
-        if lista:
-            st.subheader(lista[min(idx, len(lista) - 1)]["titulo"])
-            st.video(lista[min(idx, len(lista) - 1)]["url"])
 
-st.caption("La lista se guarda solo mientras tengas la página abierta.")
+url = st.text_input("URL del vídeo de YouTube", placeholder="https://www.youtube.com/watch?v=...")
+calidad = st.selectbox("Calidad máxima", [360, 480, 720], index=1, format_func=lambda x: f"{x}p")
+
+if st.button("Cargar vídeo", type="primary") and url:
+    try:
+        with st.spinner("Descargando vídeo en el servidor..."):
+            titulo, datos = descargar(url.strip(), calidad)
+        st.subheader(titulo)
+        st.video(datos, format="video/mp4")
+        st.download_button("Descargar MP4", datos, file_name=f"{titulo}.mp4", mime="video/mp4")
+    except Exception as e:
+        st.error(f"No se pudo cargar el vídeo: {e}")
