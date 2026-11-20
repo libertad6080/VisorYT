@@ -14,6 +14,11 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 MAX_DURACION = 15 * 60  # segundos; evita descargas enormes en el servidor
 
 
+def es_url_de_video(url: str) -> bool:
+    u = url.lower()
+    return any(p in u for p in ("watch?v=", "youtu.be/", "/shorts/", "/live/", "/embed/"))
+
+
 @st.cache_data(show_spinner=False, max_entries=5, ttl=3600)
 def descargar(url: str, altura: int):
     opts = {
@@ -34,8 +39,16 @@ def descargar(url: str, altura: int):
     # Si tienes cookies (ver notas), descomenta:
     # opts["cookiefile"] = "cookies.txt"
 
+    if not es_url_de_video(url):
+        raise ValueError(
+            "Esa URL no es de un vídeo concreto (parece un canal o una lista). "
+            "Abre un vídeo en YouTube y copia su enlace: https://www.youtube.com/watch?v=..."
+        )
+
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=False)
+        if info.get("_type") == "playlist":
+            raise ValueError("La URL es una lista de vídeos; pega la de un solo vídeo.")
         if (info.get("duration") or 0) > MAX_DURACION:
             raise ValueError(f"El vídeo supera el máximo de {MAX_DURACION // 60} minutos.")
         info = ydl.extract_info(url, download=True)
