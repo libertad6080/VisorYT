@@ -72,26 +72,28 @@ def opciones_base(altura: int, log: LogCaptura) -> dict:
         "quiet": True,
         "no_warnings": False,
         "logger": log,
-        "retries": 3,
+        "retries": 1,
+        "extractor_retries": 1,
+        "sleep_interval_requests": 1,
     }
 
 
 def estrategias(cookies):
-    """Distintas configuraciones a probar, de la más a la menos habitual."""
+    """Pocas estrategias (cada intento extra aumenta el riesgo de 429).
+    Los clientes tv/tv_simply no sufren el experimento SABR y admiten cookies."""
     lista = []
     if cookies:
-        lista.append(("cookies + cliente por defecto", {"cookiefile": cookies}))
         lista.append((
-            "cookies + clientes web",
+            "cookies + clientes tv",
             {"cookiefile": cookies,
-             "extractor_args": {"youtube": {"player_client": ["web", "web_safari", "mweb"]}}},
+             "extractor_args": {"youtube": {"player_client": ["tv", "tv_simply", "web_embedded"]}}},
         ))
-    # Cookies caducadas pueden romper la extracción: probar sin ellas
-    lista.append(("sin cookies + cliente por defecto", {}))
-    lista.append((
-        "sin cookies + clientes tv/android",
-        {"extractor_args": {"youtube": {"player_client": ["tv", "android_vr", "web_safari"]}}},
-    ))
+        lista.append(("cookies + cliente por defecto", {"cookiefile": cookies}))
+    else:
+        lista.append((
+            "sin cookies + clientes tv",
+            {"extractor_args": {"youtube": {"player_client": ["tv", "tv_simply", "web_embedded"]}}},
+        ))
     return lista
 
 
@@ -173,3 +175,8 @@ if st.button("Cargar vídeo", type="primary") and url:
     except Exception as e:
         st.error(f"No se pudo cargar el vídeo: {e}")
         st.caption(f"yt-dlp versión: {yt_dlp.version.__version__}")
+        st.info("Alternativa: reproductor de YouTube incrustado (el vídeo sí se carga desde YouTube).")
+        try:
+            st.video(url.strip())
+        except Exception:
+            pass
