@@ -17,8 +17,15 @@ MAX_DURACION = 15 * 60  # segundos; evita descargas enormes en el servidor
 @st.cache_data(show_spinner=False, max_entries=5, ttl=3600)
 def descargar(url: str, altura: int):
     opts = {
-        # Formato único (vídeo+audio) en mp4: no necesita ffmpeg
-        "format": f"best[height<={altura}][ext=mp4]/best[height<={altura}]",
+        # Vídeo y audio por separado, unidos con ffmpeg (ver packages.txt)
+        "format": (
+            f"bv*[height<={altura}][ext=mp4]+ba[ext=m4a]"
+            f"/bv*[height<={altura}]+ba"
+            f"/b[height<={altura}]/b"
+        ),
+        "merge_output_format": "mp4",
+        # YouTube exige un runtime de JavaScript para listar todos los formatos
+        "js_runtimes": {"node": {}},
         "outtmpl": os.path.join(CACHE_DIR, "%(id)s_" + str(altura) + ".%(ext)s"),
         "noplaylist": True,
         "quiet": True,
@@ -32,7 +39,8 @@ def descargar(url: str, altura: int):
         if (info.get("duration") or 0) > MAX_DURACION:
             raise ValueError(f"El vídeo supera el máximo de {MAX_DURACION // 60} minutos.")
         info = ydl.extract_info(url, download=True)
-        ruta = ydl.prepare_filename(info)
+        descargas = info.get("requested_downloads") or []
+        ruta = descargas[0]["filepath"] if descargas else ydl.prepare_filename(info)
 
     with open(ruta, "rb") as f:
         datos = f.read()
