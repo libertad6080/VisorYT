@@ -11,7 +11,7 @@ st.caption("Pega una URL de YouTube y el vídeo se reproduce desde esta web, no 
 CACHE_DIR = os.path.join(tempfile.gettempdir(), "yt_cache")
 os.makedirs(CACHE_DIR, exist_ok=True)
 
-MAX_DURACION = 15 * 60  # segundos; evita descargas enormes en el servidor
+MAX_DURACION = 60 * 60  # segundos; evita descargas enormes en el servidor
 
 
 def es_url_de_video(url: str) -> bool:
