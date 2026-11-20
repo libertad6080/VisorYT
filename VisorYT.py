@@ -72,6 +72,16 @@ def descargar(url: str, altura: int):
     return info.get("title", "Vídeo"), datos
 
 
+try:
+    _c = st.secrets.get("youtube_cookies")
+except Exception:
+    _c = None
+if _c:
+    _n = sum(1 for l in _c.splitlines() if l.strip() and not l.startswith("#"))
+    st.caption(f"🍪 Cookies detectadas: {_n} líneas")
+else:
+    st.caption("🍪 No se han detectado cookies en Secrets")
+
 url = st.text_input("URL del vídeo de YouTube", placeholder="https://www.youtube.com/watch?v=...")
 calidad = st.selectbox("Calidad máxima", [360, 480, 720], index=1, format_func=lambda x: f"{x}p")
 
