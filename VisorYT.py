@@ -81,9 +81,13 @@ def opciones_base(altura: int, log: LogCaptura) -> dict:
 
 
 def estrategias(cookies):
-    """Primero sin cookies (las cookies rotadas suelen romper la extraccion);
-    con cookies solo como respaldo."""
-    lista = [("sin cookies + cliente por defecto", {})]
+    """android_vr normalmente no exige PO token y no usa cookies.
+    Despues el cliente por defecto, y las cookies solo como ultimo respaldo."""
+    lista = [
+        ("android_vr (sin cookies)",
+         {"extractor_args": {"youtube": {"player_client": ["android_vr"]}}}),
+        ("cliente por defecto (sin cookies)", {}),
+    ]
     if cookies:
         lista.append(("cookies + cliente por defecto", {"cookiefile": cookies}))
     return lista
