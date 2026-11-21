@@ -1,4 +1,5 @@
 import os
+import re
 import tempfile
 
 import streamlit as st
@@ -165,18 +166,30 @@ else:
 url = st.text_input("URL del vídeo de YouTube", placeholder="https://www.youtube.com/watch?v=...")
 calidad = st.selectbox("Calidad máxima", [360, 480, 720], index=1, format_func=lambda x: f"{x}p")
 
+def nombre_seguro(titulo: str) -> str:
+    limpio = re.sub(r'[\\/:*?"<>|]+', "", titulo).strip()
+    return limpio or "video"
+
+
 if st.button("Cargar vídeo", type="primary") and url:
     try:
         with st.spinner("Descargando vídeo en el servidor..."):
             titulo, datos = descargar(url.strip(), calidad)
-        st.subheader(titulo)
-        st.video(datos, format="video/mp4")
-        st.download_button("Descargar MP4", datos, file_name=f"{titulo}.mp4", mime="video/mp4")
+        st.session_state["video"] = {"titulo": titulo, "datos": datos}
     except Exception as e:
+        st.session_state.pop("video", None)
         st.error(f"No se pudo cargar el vídeo: {e}")
         st.caption(f"yt-dlp versión: {yt_dlp.version.__version__}")
-        st.info("Alternativa: reproductor de YouTube incrustado (el vídeo sí se carga desde YouTube).")
-        try:
-            st.video(url.strip())
-        except Exception:
-            pass
+
+# El vídeo se guarda en session_state para que siga visible tras pulsar "Descargar"
+video = st.session_state.get("video")
+if video:
+    st.subheader(video["titulo"])
+    st.video(video["datos"], format="video/mp4")
+    st.download_button(
+        "⬇️ Descargar MP4",
+        video["datos"],
+        file_name=f"{nombre_seguro(video['titulo'])}.mp4",
+        mime="video/mp4",
+        type="primary",
+    )
