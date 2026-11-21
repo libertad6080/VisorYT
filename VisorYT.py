@@ -1,3 +1,4 @@
+import glob
 import os
 import re
 import shutil
@@ -147,6 +148,68 @@ def descargar(url: str, altura: int):
     raise RuntimeError("Ninguna estrategia funcionó:\n\n" + detalle)
 
 
+@st.cache_data(show_spinner=False, max_entries=10, ttl=3600)
+def subtitulos_es(url: str):
+    """Devuelve (titulo, tipo, idioma, extension, datos) o None si no hay subtitulos en espanol."""
+    if not es_url_de_video(url):
+        raise ValueError("Esa URL no es de un vídeo concreto.")
+
+    cookies = ruta_cookies()
+    errores = []
+    for nombre, extra in estrategias(cookies):
+        log = LogCaptura()
+        base = opciones_base(360, log)
+        base.update(extra)
+        base.update({"skip_download": True, "format": None})
+        try:
+            with yt_dlp.YoutubeDL({**base, "ignore_no_formats_error": True}) as ydl:
+                info = ydl.extract_info(url, download=False)
+
+            manuales = [k for k in (info.get("subtitles") or {}) if k.startswith("es")]
+            automaticos = [k for k in (info.get("automatic_captions") or {}) if k.startswith("es")]
+            if manuales:
+                tipo, idioma = "manual", ("es" if "es" in manuales else manuales[0])
+            elif automaticos:
+                tipo, idioma = "automático", ("es" if "es" in automaticos else automaticos[0])
+            else:
+                return None
+
+            con_ffmpeg = shutil.which("ffmpeg") is not None
+            opts = {
+                **base,
+                "ignore_no_formats_error": True,
+                "writesubtitles": tipo == "manual",
+                "writeautomaticsub": tipo != "manual",
+                "subtitleslangs": [idioma],
+                "subtitlesformat": "srt/vtt/best",
+                "outtmpl": os.path.join(CACHE_DIR, "sub_%(id)s.%(ext)s"),
+            }
+            if con_ffmpeg:
+                opts["postprocessors"] = [{"key": "FFmpegSubtitlesConvertor", "format": "srt", "when": "before_dl"}]
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                ydl.download([url])
+
+            archivos = glob.glob(os.path.join(CACHE_DIR, f"sub_{info['id']}.{idioma}.*"))
+            if not archivos:
+                raise RuntimeError("yt-dlp no generó ningún archivo de subtítulos.")
+            archivo = sorted(archivos, key=lambda a: not a.endswith(".srt"))[0]
+            with open(archivo, "rb") as f:
+                datos = f.read()
+            ext = os.path.splitext(archivo)[1].lstrip(".")
+            for a in archivos:
+                try:
+                    os.remove(a)
+                except OSError:
+                    pass
+            return info.get("title", "Vídeo"), tipo, idioma, ext, datos
+        except ValueError:
+            raise
+        except Exception as e:
+            errores.append(f"• **{nombre}**: {e}" + ("\n  - " + "\n  - ".join(log.mensajes[-2:]) if log.mensajes else ""))
+
+    raise RuntimeError("No se pudieron obtener los subtítulos:\n\n" + "\n\n".join(errores))
+
+
 # --- Interfaz ---------------------------------------------------------------
 try:
     _c = st.secrets.get("youtube_cookies")
@@ -205,3 +268,30 @@ if url and es_url_de_video(url):
             mime="video/mp4",
             type="primary",
         )
+
+    st.divider()
+    if st.button("📝 Buscar subtítulos en español"):
+        try:
+            with st.spinner("Buscando subtítulos..."):
+                res = subtitulos_es(url)
+            st.session_state["subs"] = {"url": url, "res": res}
+        except Exception as e:
+            st.session_state.pop("subs", None)
+            st.error(f"No se pudieron obtener los subtítulos: {e}")
+
+    subs = st.session_state.get("subs")
+    if subs and subs["url"] == url:
+        if subs["res"] is None:
+            st.info("Este vídeo no tiene subtítulos en español.")
+        else:
+            titulo_s, tipo, idioma, ext, datos_s = subs["res"]
+            st.success(f"Subtítulos en español ({tipo}, {idioma}) disponibles")
+            if tipo == "automático":
+                st.caption("Son subtítulos generados o traducidos automáticamente, pueden tener errores.")
+            st.download_button(
+                f"💾 Guardar subtítulos (.{ext})",
+                datos_s,
+                file_name=f"{nombre_seguro(titulo_s)}.{idioma}.{ext}",
+                mime="application/x-subrip" if ext == "srt" else "text/vtt",
+                type="primary",
+            )
