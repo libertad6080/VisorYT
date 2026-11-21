@@ -80,21 +80,16 @@ def opciones_base(altura: int, log: LogCaptura) -> dict:
 
 
 def estrategias(cookies):
-    """Pocas estrategias (cada intento extra aumenta el riesgo de 429).
-    Los clientes tv/tv_simply no sufren el experimento SABR y admiten cookies."""
+    """Evita tv_simply / web_embedded (exigen PO token o devuelven formatos sin URL).
+    Se prueba con y sin cookies: a veces las cookies rotadas son lo que rompe la extraccion."""
     lista = []
     if cookies:
-        lista.append((
-            "cookies + clientes tv",
-            {"cookiefile": cookies,
-             "extractor_args": {"youtube": {"player_client": ["tv", "tv_simply", "web_embedded"]}}},
-        ))
         lista.append(("cookies + cliente por defecto", {"cookiefile": cookies}))
-    else:
-        lista.append((
-            "sin cookies + clientes tv",
-            {"extractor_args": {"youtube": {"player_client": ["tv", "tv_simply", "web_embedded"]}}},
-        ))
+    lista.append(("sin cookies + cliente por defecto", {}))
+    lista.append((
+        "sin cookies + mweb",
+        {"extractor_args": {"youtube": {"player_client": ["mweb"]}}},
+    ))
     return lista
 
 
