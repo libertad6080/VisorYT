@@ -1,5 +1,6 @@
 import os
 import re
+import shutil
 import tempfile
 
 import streamlit as st
@@ -65,7 +66,7 @@ def opciones_base(altura: int, log: LogCaptura) -> dict:
     return {
         "format": formato(altura),
         "merge_output_format": "mp4",
-        "js_runtimes": {"node": {}},
+        "js_runtimes": {"deno": {}},
         # Permite descargar el solucionador de desafíos JS si no está instalado
         "remote_components": ["ejs:github"],
         "outtmpl": os.path.join(CACHE_DIR, "%(id)s_" + str(altura) + ".%(ext)s"),
@@ -80,16 +81,11 @@ def opciones_base(altura: int, log: LogCaptura) -> dict:
 
 
 def estrategias(cookies):
-    """Evita tv_simply / web_embedded (exigen PO token o devuelven formatos sin URL).
-    Se prueba con y sin cookies: a veces las cookies rotadas son lo que rompe la extraccion."""
-    lista = []
+    """Primero sin cookies (las cookies rotadas suelen romper la extraccion);
+    con cookies solo como respaldo."""
+    lista = [("sin cookies + cliente por defecto", {})]
     if cookies:
         lista.append(("cookies + cliente por defecto", {"cookiefile": cookies}))
-    lista.append(("sin cookies + cliente por defecto", {}))
-    lista.append((
-        "sin cookies + mweb",
-        {"extractor_args": {"youtube": {"player_client": ["mweb"]}}},
-    ))
     return lista
 
 
@@ -157,6 +153,9 @@ if _c:
     st.caption(f"🍪 Cookies detectadas: {_n} líneas")
 else:
     st.caption("🍪 No se han detectado cookies en Secrets")
+
+st.caption("⚙️ Motor JS (deno): " + ("✅ " + shutil.which("deno") if shutil.which("deno") else "❌ no encontrado")
+           + " · ffmpeg: " + ("✅" if shutil.which("ffmpeg") else "❌ no encontrado"))
 
 url = st.text_input(
     "URL del vídeo de YouTube", placeholder="https://www.youtube.com/watch?v=..."
