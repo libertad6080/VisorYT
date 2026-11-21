@@ -7,7 +7,7 @@ import yt_dlp
 
 st.set_page_config(page_title="Reproductor de vídeo", page_icon="🎬")
 st.title("🎬 Reproductor de vídeo")
-st.caption("Pega una URL de YouTube y el vídeo se reproduce desde esta web, no desde YouTube.")
+st.caption("Pega una URL de YouTube y se muestra el reproductor al instante. La descarga solo se prepara si pulsas el botón.")
 
 CACHE_DIR = os.path.join(tempfile.gettempdir(), "yt_cache")
 os.makedirs(CACHE_DIR, exist_ok=True)
@@ -163,33 +163,47 @@ if _c:
 else:
     st.caption("🍪 No se han detectado cookies en Secrets")
 
-url = st.text_input("URL del vídeo de YouTube", placeholder="https://www.youtube.com/watch?v=...")
-calidad = st.selectbox("Calidad máxima", [360, 480, 720], index=1, format_func=lambda x: f"{x}p")
+url = st.text_input(
+    "URL del vídeo de YouTube", placeholder="https://www.youtube.com/watch?v=..."
+).strip()
+
 
 def nombre_seguro(titulo: str) -> str:
     limpio = re.sub(r'[\\/:*?"<>|]+', "", titulo).strip()
     return limpio or "video"
 
 
-if st.button("Cargar vídeo", type="primary") and url:
-    try:
-        with st.spinner("Descargando vídeo en el servidor..."):
-            titulo, datos = descargar(url.strip(), calidad)
-        st.session_state["video"] = {"titulo": titulo, "datos": datos}
-    except Exception as e:
-        st.session_state.pop("video", None)
-        st.error(f"No se pudo cargar el vídeo: {e}")
-        st.caption(f"yt-dlp versión: {yt_dlp.version.__version__}")
-
-# El vídeo se guarda en session_state para que siga visible tras pulsar "Descargar"
-video = st.session_state.get("video")
-if video:
-    st.subheader(video["titulo"])
-    st.video(video["datos"], format="video/mp4")
-    st.download_button(
-        "⬇️ Descargar MP4",
-        video["datos"],
-        file_name=f"{nombre_seguro(video['titulo'])}.mp4",
-        mime="video/mp4",
-        type="primary",
+if url and not es_url_de_video(url):
+    st.warning(
+        "Esa URL no es de un vídeo concreto (parece un canal o una lista). "
+        "Copia el enlace de un vídeo: https://www.youtube.com/watch?v=..."
     )
+
+if url and es_url_de_video(url):
+    # Reproductor incrustado: aparece al instante, sin descargar nada
+    st.video(url)
+
+    st.divider()
+    calidad = st.selectbox("Calidad de la descarga", [360, 480, 720], index=1, format_func=lambda x: f"{x}p")
+
+    # La descarga solo se hace si el usuario la pide
+    if st.button("⬇️ Preparar descarga MP4", type="primary"):
+        try:
+            with st.spinner("Preparando el archivo en el servidor..."):
+                titulo, datos = descargar(url, calidad)
+            st.session_state["video"] = {"url": url, "calidad": calidad, "titulo": titulo, "datos": datos}
+        except Exception as e:
+            st.session_state.pop("video", None)
+            st.error(f"No se pudo preparar la descarga: {e}")
+            st.caption(f"yt-dlp versión: {yt_dlp.version.__version__}")
+
+    listo = st.session_state.get("video")
+    if listo and listo["url"] == url and listo["calidad"] == calidad:
+        st.success(f"Listo: {listo['titulo']}")
+        st.download_button(
+            "💾 Guardar MP4",
+            listo["datos"],
+            file_name=f"{nombre_seguro(listo['titulo'])}.mp4",
+            mime="video/mp4",
+            type="primary",
+        )
