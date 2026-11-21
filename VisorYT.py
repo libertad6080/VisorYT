@@ -63,8 +63,15 @@ def formato(altura: int) -> str:
     )
 
 
+def proxy_configurado():
+    try:
+        return st.secrets.get("youtube_proxy") or None
+    except Exception:
+        return None
+
+
 def opciones_base(altura: int, log: LogCaptura) -> dict:
-    return {
+    opts = {
         "format": formato(altura),
         "merge_output_format": "mp4",
         "js_runtimes": {"deno": {}},
@@ -79,16 +86,15 @@ def opciones_base(altura: int, log: LogCaptura) -> dict:
         "extractor_retries": 1,
         "sleep_interval_requests": 1,
     }
+    proxy = proxy_configurado()
+    if proxy:
+        opts["proxy"] = proxy
+    return opts
 
 
 def estrategias(cookies):
-    """android_vr normalmente no exige PO token y no usa cookies.
-    Despues el cliente por defecto, y las cookies solo como ultimo respaldo."""
-    lista = [
-        ("android_vr (sin cookies)",
-         {"extractor_args": {"youtube": {"player_client": ["android_vr"]}}}),
-        ("cliente por defecto (sin cookies)", {}),
-    ]
+    """Primero sin cookies; con cookies solo como respaldo."""
+    lista = [("cliente por defecto (sin cookies)", {})]
     if cookies:
         lista.append(("cookies + cliente por defecto", {"cookiefile": cookies}))
     return lista
@@ -221,7 +227,7 @@ if _c:
 else:
     st.caption("🍪 No se han detectado cookies en Secrets")
 
-st.caption("⚙️ Motor JS (deno): " + ("✅ " + shutil.which("deno") if shutil.which("deno") else "❌ no encontrado")
+st.caption(("🌐 Proxy activo · " if proxy_configurado() else "") + "⚙️ Motor JS (deno): " + ("✅ " + shutil.which("deno") if shutil.which("deno") else "❌ no encontrado")
            + " · ffmpeg: " + ("✅" if shutil.which("ffmpeg") else "❌ no encontrado"))
 
 url = st.text_input(
