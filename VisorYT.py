@@ -1,4 +1,3 @@
-import base64
 import glob
 import html
 import json
@@ -19,7 +18,7 @@ st.caption("Pega una URL de YouTube y se muestra el reproductor al instante. La 
 CACHE_DIR = os.path.join(tempfile.gettempdir(), "yt_cache")
 os.makedirs(CACHE_DIR, exist_ok=True)
 
-VERSION_SUBS = "subs-v7d-curl"  # cambia este valor para forzar a ignorar la caché
+VERSION_SUBS = "subs-v8-autoclick"  # cambia este valor para forzar a ignorar la caché
 
 MAX_DURACION = 60 * 60  # segundos; evita descargas enormes en el servidor
 
@@ -34,7 +33,7 @@ def sin_ansi(txt) -> str:
     return re.sub(r"\x1b?\[[0-9;]*m", "", str(txt))
 
 
-def con_reintentos(fn, esperas=(5, 15)):
+def con_reintentos(fn, esperas=(6, 20, 45)):
     """Ejecuta fn(); si YouTube responde 429 (demasiadas peticiones), espera y vuelve a intentarlo."""
     for i in range(len(esperas) + 1):
         try:
@@ -134,14 +133,20 @@ def estrategias(cookies):
 
 
 def estrategias_subs(cookies):
-    """Para subtítulos: cliente por defecto, otros clientes de YouTube y, al final, con cookies."""
-    lista = [
-        ("cliente por defecto", {}),
-        ("clientes tv/web_safari", {"extractor_args": {"youtube": {"player_client": ["tv", "web_safari"]}}}),
-    ]
+    """Para subtítulos: con cookies primero (YouTube limita menos a sesiones con cuenta) y luego sin ellas."""
+    lista = []
     if cookies:
         lista.append(("cookies + cliente por defecto", {"cookiefile": cookies}))
+    lista.append(("cliente por defecto (sin cookies)", {}))
     return lista
+
+
+def proxy_subs():
+    """Proxy solo para subtítulos (pesan pocos KB): youtube_proxy_subs, o youtube_proxy si no existe."""
+    try:
+        return st.secrets.get("youtube_proxy_subs") or st.secrets.get("youtube_proxy") or None
+    except Exception:
+        return None
 
 
 def explicar_error(detalle: str) -> str:
@@ -157,7 +162,9 @@ def explicar_error(detalle: str) -> str:
     if "429" in t:
         consejos.append(
             "⏳ YouTube está limitando las peticiones de este servidor (429). "
-            "Espera unos minutos y vuelve a pulsar; si pasa siempre, añade cookies o un proxy en Secrets."
+            "Espera unos minutos y vuelve a pulsar. Si pasa siempre: añade las cookies en Secrets "
+            "(`youtube_cookies`) o un proxy residencial solo para subtítulos (`youtube_proxy_subs`). "
+            "Ejecutar la app en tu propio ordenador también lo evita, porque usa tu IP de casa."
         )
     return "\n\n".join(consejos)
 
@@ -636,6 +643,8 @@ def info_subs(url: str, version: str = ""):
         log = LogCaptura()
         opts = opciones_base(360, log)
         opts.update(extra)
+        if proxy_subs():
+            opts["proxy"] = proxy_subs()
         opts.update({"skip_download": True, "format": None, "ignore_no_formats_error": True})
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
@@ -660,6 +669,8 @@ def descargar_subs(url: str, video_id: str, tipo: str, clave: str, idioma_limpie
         log = LogCaptura()
         base = opciones_base(360, log)
         base.update(extra)
+        if proxy_subs():
+            base["proxy"] = proxy_subs()
         opts = {
             **base,
             "skip_download": True,
@@ -706,28 +717,36 @@ def descargar_subs(url: str, video_id: str, tipo: str, clave: str, idioma_limpie
     raise RuntimeError(explicar_error(detalle) + "\n\n**No se pudieron obtener los subtítulos:**\n\n" + detalle)
 
 
-def descarga_automatica(datos: bytes, nombre: str, mime: str):
-    """Lanza la descarga en el navegador sin que haya que pulsar otro botón."""
-    if len(datos) > 90 * 1024 * 1024:
-        st.warning("El archivo es muy grande para guardarse solo: usa el botón de debajo.")
-        return
-    b64 = base64.b64encode(datos).decode("ascii")
+def boton_guardar(etiqueta: str, datos: bytes, nombre: str, mime: str, key: str):
+    """Botón normal de guardar. Con on_click='ignore' (Streamlit reciente) no recarga la página al pulsarlo."""
+    try:
+        return st.download_button(etiqueta, datos, file_name=nombre, mime=mime, key=key, on_click="ignore")
+    except TypeError:
+        return st.download_button(etiqueta, datos, file_name=nombre, mime=mime, key=key)
+
+
+def pulsar_automaticamente(etiqueta: str):
+    """Pulsa por ti el botón de guardar en cuanto aparece, para que la descarga empiece sola.
+
+    Se hace desde la propia página (no desde un cuadro aislado), que es lo que permite el navegador;
+    además el archivo no viaja dentro de la página, así que sirve también para vídeos grandes.
+    """
     components.html(
         f"""<script>
         (function () {{
-          try {{
-            const bin = atob("{b64}");
-            const bytes = new Uint8Array(bin.length);
-            for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-            const blob = new Blob([bytes], {{ type: {json.dumps(mime)} }});
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            a.href = url;
-            a.download = {json.dumps(nombre)};
-            document.body.appendChild(a);
-            a.click();
-            setTimeout(function () {{ URL.revokeObjectURL(url); a.remove(); }}, 15000);
-          }} catch (e) {{ console.error(e); }}
+          const etiqueta = {json.dumps(etiqueta)};
+          let intentos = 0;
+          const t = setInterval(function () {{
+            intentos++;
+            try {{
+              const doc = window.parent.document;
+              const botones = doc.querySelectorAll('[data-testid="stDownloadButton"] button, [data-testid="stDownloadButton"] a');
+              for (const b of botones) {{
+                if ((b.textContent || "").includes(etiqueta)) {{ clearInterval(t); b.click(); return; }}
+              }}
+            }} catch (e) {{ clearInterval(t); }}
+            if (intentos > 60) clearInterval(t);
+          }}, 250);
         }})();
         </script>""",
         height=0,
@@ -783,9 +802,8 @@ if url and es_url_de_video(url):
         try:
             with st.spinner("Preparando el vídeo en el servidor... puede tardar un rato; se descargará solo al terminar."):
                 titulo, datos = descargar(url, calidad)
-            st.session_state["video"] = {"url": url, "calidad": calidad, "titulo": titulo, "datos": datos}
-            descarga_automatica(datos, f"{nombre_seguro(titulo)}.mp4", "video/mp4")
-            st.success(f"Listo: {titulo}")
+            st.session_state["video"] = {"url": url, "calidad": calidad, "titulo": titulo,
+                                         "datos": datos, "auto": True, "n": time.time_ns()}
         except Exception as e:
             st.session_state.pop("video", None)
             st.error(f"No se pudo preparar la descarga: {e}")
@@ -793,12 +811,10 @@ if url and es_url_de_video(url):
 
     listo = st.session_state.get("video")
     if listo and listo["url"] == url and listo["calidad"] == calidad:
-        st.download_button(
-            "¿No se ha descargado solo? Guárdalo aquí",
-            listo["datos"],
-            file_name=f"{nombre_seguro(listo['titulo'])}.mp4",
-            mime="video/mp4",
-        )
+        boton_guardar("💾 Guardar MP4", listo["datos"], f"{nombre_seguro(listo['titulo'])}.mp4",
+                      "video/mp4", key=f"dl_mp4_{listo['n']}")
+        if listo.pop("auto", False):
+            pulsar_automaticamente("Guardar MP4")
 
     st.divider()
 
@@ -811,12 +827,8 @@ if url and es_url_de_video(url):
                 ext, datos = descargar_subs(url, inf["id"], tipo, clave, idioma_limpieza, VERSION_SUBS)
             nombre = f"{nombre_seguro(inf['titulo'])}.{'es' if cual == 'es' else inf['base']}.{ext}"
             mime = "application/x-subrip" if ext == "srt" else "text/vtt"
-            st.session_state["sub_fallback"] = {"url": url, "nombre": nombre, "datos": datos, "mime": mime}
-            descarga_automatica(datos, nombre, mime)
-            if cual == "es" and not inf["es_video"]:
-                st.caption("Traducción automática de YouTube: puede tener errores.")
-            elif tipo == "automático":
-                st.caption("Subtítulos generados automáticamente por YouTube: pueden tener errores.")
+            st.session_state["sub_fallback"] = {"url": url, "nombre": nombre, "datos": datos,
+                                                "mime": mime, "auto": True, "n": time.time_ns()}
         except Exception as e:
             st.session_state.pop("sub_fallback", None)
             st.error(str(e))
@@ -860,9 +872,6 @@ if url and es_url_de_video(url):
 
     fb = st.session_state.get("sub_fallback")
     if fb and fb["url"] == url:
-        st.download_button(
-            "¿No se han descargado solos? Guárdalos aquí",
-            fb["datos"],
-            file_name=fb["nombre"],
-            mime=fb["mime"],
-        )
+        boton_guardar("💾 Guardar subtítulos", fb["datos"], fb["nombre"], fb["mime"], key=f"dl_subs_{fb['n']}")
+        if fb.pop("auto", False):
+            pulsar_automaticamente("Guardar subtítulos")
