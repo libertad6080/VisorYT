@@ -8,9 +8,48 @@ import shutil
 import tempfile
 import time
 
+import importlib
+import subprocess
+import sys
+
 import streamlit as st
 import streamlit.components.v1 as components
-import yt_dlp
+
+
+@st.cache_resource(show_spinner=False)
+def asegurar_curl_cffi():
+    """Si falta curl-cffi, intenta instalarlo ANTES de importar yt_dlp. Devuelve None o el motivo del fallo."""
+    try:
+        import curl_cffi  # noqa: F401
+        return None
+    except Exception:
+        pass
+    paquete = "yt-dlp[default,curl-cffi]"
+    intentos = [
+        [sys.executable, "-m", "pip", "install", "--quiet", paquete],
+        ["uv", "pip", "install", "--quiet", "--python", sys.executable, paquete],
+    ]
+    ultimo = ""
+    for cmd in intentos:
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            if r.returncode == 0:
+                importlib.invalidate_caches()
+                try:
+                    import curl_cffi  # noqa: F401
+                    return None
+                except Exception as e:
+                    ultimo = f"instalado pero no se puede importar: {e}"
+            else:
+                ultimo = (r.stderr or r.stdout).strip()[-300:]
+        except Exception as e:
+            ultimo = str(e)
+    return ultimo or "no se pudo instalar"
+
+
+ERROR_INSTALAR_CURL = asegurar_curl_cffi()
+
+import yt_dlp  # noqa: E402  (se importa después para que detecte curl-cffi)
 
 st.set_page_config(page_title="Reproductor de vídeo", page_icon="🎬")
 st.title("🎬 Reproductor de vídeo")
@@ -19,7 +58,7 @@ st.caption("Pega una URL de YouTube y se muestra el reproductor al instante. La 
 CACHE_DIR = os.path.join(tempfile.gettempdir(), "yt_cache")
 os.makedirs(CACHE_DIR, exist_ok=True)
 
-VERSION_SUBS = "subs-v7c-429"  # cambia este valor para forzar a ignorar la caché
+VERSION_SUBS = "subs-v7d-curl"  # cambia este valor para forzar a ignorar la caché
 
 MAX_DURACION = 60 * 60  # segundos; evita descargas enormes en el servidor
 
@@ -48,8 +87,11 @@ def con_reintentos(fn, esperas=(5, 15)):
 try:
     import curl_cffi  # noqa: F401
     CURL_CFFI = True
-except Exception:
+    CURL_VERSION = getattr(curl_cffi, "__version__", "")
+except Exception as _e:
     CURL_CFFI = False
+    CURL_VERSION = ""
+    CURL_MOTIVO = ERROR_INSTALAR_CURL or str(_e)
 
 
 class LogCaptura:
@@ -744,7 +786,13 @@ else:
 
 st.caption(("🌐 Proxy activo · " if proxy_configurado() else "") + "⚙️ Motor JS (deno): " + ("✅ " + shutil.which("deno") if shutil.which("deno") else "❌ no encontrado")
            + " · ffmpeg: " + ("✅" if shutil.which("ffmpeg") else "❌ no encontrado")
-           + " · curl-cffi: " + ("✅" if CURL_CFFI else "❌ falta (instálalo en requirements.txt)"))
+           + " · curl-cffi: " + (("✅ " + CURL_VERSION) if CURL_CFFI else "❌"))
+if not CURL_CFFI:
+    st.warning(
+        "curl-cffi no está instalado y es necesario para bajar subtítulos. "
+        "Añade `yt-dlp[default,curl-cffi]` a requirements.txt y reinicia la app. "
+        f"Motivo técnico: {CURL_MOTIVO}"
+    )
 
 url = st.text_input(
     "URL del vídeo de YouTube", placeholder="https://www.youtube.com/watch?v=..."
