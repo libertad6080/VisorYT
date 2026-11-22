@@ -8,48 +8,9 @@ import shutil
 import tempfile
 import time
 
-import importlib
-import subprocess
-import sys
-
 import streamlit as st
 import streamlit.components.v1 as components
-
-
-@st.cache_resource(show_spinner=False)
-def asegurar_curl_cffi():
-    """Si falta curl-cffi, intenta instalarlo ANTES de importar yt_dlp. Devuelve None o el motivo del fallo."""
-    try:
-        import curl_cffi  # noqa: F401
-        return None
-    except Exception:
-        pass
-    paquete = "yt-dlp[default,curl-cffi]"
-    intentos = [
-        [sys.executable, "-m", "pip", "install", "--quiet", paquete],
-        ["uv", "pip", "install", "--quiet", "--python", sys.executable, paquete],
-    ]
-    ultimo = ""
-    for cmd in intentos:
-        try:
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-            if r.returncode == 0:
-                importlib.invalidate_caches()
-                try:
-                    import curl_cffi  # noqa: F401
-                    return None
-                except Exception as e:
-                    ultimo = f"instalado pero no se puede importar: {e}"
-            else:
-                ultimo = (r.stderr or r.stdout).strip()[-300:]
-        except Exception as e:
-            ultimo = str(e)
-    return ultimo or "no se pudo instalar"
-
-
-ERROR_INSTALAR_CURL = asegurar_curl_cffi()
-
-import yt_dlp  # noqa: E402  (se importa después para que detecte curl-cffi)
+import yt_dlp
 
 st.set_page_config(page_title="Reproductor de vídeo", page_icon="🎬")
 st.title("🎬 Reproductor de vídeo")
@@ -91,7 +52,7 @@ try:
 except Exception as _e:
     CURL_CFFI = False
     CURL_VERSION = ""
-    CURL_MOTIVO = ERROR_INSTALAR_CURL or str(_e)
+    CURL_MOTIVO = str(_e)
 
 
 class LogCaptura:
@@ -790,7 +751,7 @@ st.caption(("🌐 Proxy activo · " if proxy_configurado() else "") + "⚙️ Mo
 if not CURL_CFFI:
     st.warning(
         "curl-cffi no está instalado y es necesario para bajar subtítulos. "
-        "Añade `yt-dlp[default,curl-cffi]` a requirements.txt y reinicia la app. "
+        "Añade `yt-dlp[default,curl-cffi]` a requirements.txt (en la raíz del repositorio) y reinicia la app. "
         f"Motivo técnico: {CURL_MOTIVO}"
     )
 
